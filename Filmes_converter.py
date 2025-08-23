@@ -110,24 +110,31 @@ def main():
     
     for index, movie_data in enumerate(movies_from_m3u):
         full_name = movie_data.get("name", "Nome não encontrado").strip()
-        movie_name = full_name
+        
+        # --- NOVO TRECHO DE CÓDIGO ---
+        # Removendo tags comuns como "(4K)", "[Dublado]" e outras antes de buscar
+        movie_name = re.sub(r'\(4K\)|\[4K\]|\(HD\)|\[HD\]|\(Dublado\)|\[Dublado\]', '', full_name, flags=re.IGNORECASE).strip()
+        # -----------------------------
+
         movie_year = None
         
-        year_match = re.search(r'\((\d{4})\)', full_name)
+        year_match = re.search(r'\((\d{4})\)', movie_name)
         if year_match:
             movie_year = year_match.group(1)
-            movie_name = re.sub(r'\s*\(\d{4}\)', '', full_name).strip()
+            # Remove o ano para evitar que ele seja enviado na busca por título
+            movie_name = re.sub(r'\s*\(\d{4}\)', '', movie_name).strip()
         
         print(f"\n({index + 1}/{total_movies}) Processando: '{full_name}'")
+        print(f"  [Título Limpo] Usando para a busca: '{movie_name}'") # Adicionado para mostrar a mudança
         
         # Busca os dados no TMDB
         tmdb_info = search_movie_on_tmdb(movie_name, movie_year, TMDB_API_TOKEN)
         
         if tmdb_info:
             movie_data['tmdb_info'] = tmdb_info
-            print(f"  [Sucesso] Dados do TMDB encontrados para '{movie_name}'.")
+            print(f"  [Sucesso] Dados do TMDB encontrados para '{movie_name}'.")
         else:
-            print(f"  [Aviso] Nenhum dado encontrado no TMDB para '{movie_name}'.")
+            print(f"  [Aviso] Nenhum dado encontrado no TMDB para '{movie_name}'.")
             # --- LÓGICA DE FALLBACK ---
             # Se o TMDB falhou, verifica se existe 'tvg-logo' no M3U
             fallback_logo = movie_data.get("attributes", {}).get("tvg-logo")
@@ -137,10 +144,10 @@ def main():
                     "overview": "Sinopse não encontrada.", # Adiciona uma sinopse padrão
                     "poster_path": fallback_logo
                 }
-                print(f"  [Fallback] Usando 'tvg-logo' do M3U como pôster.")
+                print(f"  [Fallback] Usando 'tvg-logo' do M3U como pôster.")
             else:
                 movie_data['tmdb_info'] = None
-                print(f"  [Falha] Nenhuma informação de imagem encontrada (TMDB ou tvg-logo).")
+                print(f"  [Falha] Nenhuma informação de imagem encontrada (TMDB ou tvg-logo).")
 
         enriched_movie_list.append(movie_data)
 

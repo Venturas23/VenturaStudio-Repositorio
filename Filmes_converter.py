@@ -109,11 +109,16 @@ def main():
     enriched_movie_list = []
     
     for index, movie_data in enumerate(movies_from_m3u):
-        full_name = movie_data.get("name", "Nome não encontrado").strip()
+        movie_name_raw = movie_data.get("name") # Nome bruto do filme
+
+        if movie_name_raw is None:
+            full_name = "Nome não encontrado"
+        else:
+            full_name = movie_name_raw.strip()
         
         # --- NOVO TRECHO DE CÓDIGO ---
         # Removendo tags comuns como "(4K)", "[Dublado]" e outras antes de buscar
-        movie_name = re.sub(r'\(4K\)|\[4K\]|\(HD\)|\[HD\]|\(Dublado\)|\[Dublado\]', '', full_name, flags=re.IGNORECASE).strip()
+        movie_name = re.sub(r'\(4K\)|\[4K\]|4K|\(HD\)|\[HD\]|\(Dublado\)|\[Dublado\]|\[HDR\]|\[Hybrid\]|\[Dublagem Nao Oficial\]|\[CAM\]|\[Corte do Diretor\]|\[L\]|\[Libras\]|\[LIBRAS\]', '', full_name, flags=re.IGNORECASE).strip()
         # -----------------------------
 
         movie_year = None

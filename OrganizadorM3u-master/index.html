@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+<link href="https://fonts.googleapis.com/css?family=Roboto+Condensed" rel="stylesheet">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Allerta+Stencil">
+<script src="js/executar.js"></script>
+<link rel="stylesheet" href="css/bootstrap.css"/>
+<head>
+	<title>Organizador de arquivos M3U</title>
+</head>
+<div class="navbar">
+	  <div class = 'logo'><label> R-M3U</label> </div>
+	  	<div class = 'pesquisa'>
+	  		<input type="text" id="myInput" onkeyup="filtrar()" placeholder="Pesquisar..." title=""> </input>
+		</div>
+	</div>
+<body>
+	
+	<div class="main">
+		<div id="drop_zone" class="drop_zone" ondrop="dropHandler(event);" ondragover="dragOverHandler(event);"></div>
+		<input type="file" id="fileinput" required>  </input>
+		<table width="100%" BORDER = 0>
+			<tr>
+				<td valign="top" class = 'espaco'>
+					
+				</td>
+				<td valign="top" >
+					<div id = 'div1' class = 'accordion'></div>
+				</td>
+				<td valign="top">
+					<div id = 'div2' class = 'accordion'></div>
+				</td>
+			</tr>
+		</table>
+	</div>
+</body>
+</html>

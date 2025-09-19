@@ -118,7 +118,7 @@ def main():
         
         # --- NOVO TRECHO DE CÓDIGO ---
         # Removendo tags comuns como "(4K)", "[Dublado]" e outras antes de buscar
-        movie_name = re.sub(r'\(4K\)|\[4K\]|4K|\(HD\)|\[HD\]|\(Dublado\)|\[Dublado\]|\[HDR\]|\[Hybrid\]|\[Dublagem Nao Oficial\]|\[CAM\]|\[Corte do Diretor\]|\[L\]|\[Libras\]|\[LIBRAS\]', '', full_name, flags=re.IGNORECASE).strip()
+        movie_name = re.sub(r'\(4K\)|\[4K\]|4K|\(HD\)|\[HD\]|\(Dublado\)|\[Dublado\]|\[HDR\]|\[Hybrid\]|\[Dublagem Nao Oficial\]|\[CAM\]|\[Corte do Diretor\]|\[L\]|\[Libras\]|\[LIBRAS\]\[Cinema\]', '', full_name, flags=re.IGNORECASE).strip()
         # -----------------------------
 
         movie_year = None

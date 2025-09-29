@@ -14,9 +14,6 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 # --- Funções ---
 
 def parse_m3u_manually(file_path):
-    """
-    Analisa um arquivo M3U manualmente e retorna uma lista de dicionários.
-    """
     items = []
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
@@ -26,23 +23,15 @@ def parse_m3u_manually(file_path):
     for i, line in enumerate(lines):
         if line.startswith('#EXTINF'):
             attrs = dict(pattern.findall(line))
-            
-            # Tenta pegar o nome da série do tvg-name
             name = attrs.get('tvg-name', '')
-
-            # Se não houver tvg-name, usa o nome do final da linha
             if not name:
                 name_match = re.search(r',(.+)', line)
                 name = name_match.group(1).strip() if name_match else 'Nome não encontrado'
 
-            # Pega a categoria
             group_title = attrs.get('group-title', '')
             if not group_title:
                 match = re.search(r'group="([^"]*?)"', line)
-                if match:
-                    group = match.group(1)
-                else:
-                    group = 'Sem Categoria'
+                group = match.group(1) if match else 'Sem Categoria'
             else:
                 group = group_title
 
@@ -59,7 +48,6 @@ def parse_m3u_manually(file_path):
     return items
 
 def search_tv_show_on_tmdb(series_title, api_token):
-    # (Função inalterada)
     if not series_title:
         return None
     
@@ -97,42 +85,54 @@ def search_tv_show_on_tmdb(series_title, api_token):
         print(f"    [Erro de API] Não foi possível conectar ao TMDB para '{series_title}': {e}")
         return None
 
-def extract_episode_info(name):
-    """
-    Extrai o nome da série e a numeração do episódio (SXXEXX).
-    """
-    # Remove texto entre parênteses, colchetes e anos
-    # Aprimoramos a expressão regular para ser mais robusta
-    clean_name = re.sub(r'\[.*?\]|\(.*?\)|(\d{4})', '', name).strip()
+def get_brazil_certification(tv_id, api_token):
+    url = f"{TMDB_API_BASE_URL}/tv/{tv_id}/content_ratings"
+    headers = {
+        "accept": "application/json",
+        "Authorization": f"Bearer {api_token}"
+    }
 
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        for result in data.get("results", []):
+            if result.get("iso_3166_1") == "BR":
+                return {
+                    "ageGroup": result.get("rating", "Indisponível"),
+                    "descriptors": []
+                }
+        return {
+            "ageGroup": "Indisponível",
+            "descriptors": []
+        }
+
+    except requests.exceptions.RequestException as e:
+        print(f"[Erro] Falha ao buscar classificação indicativa para série ID {tv_id}: {e}")
+        return {
+            "ageGroup": "Indisponível",
+            "descriptors": []
+        }
+
+def extract_episode_info(name):
+    clean_name = re.sub(r'\[.*?\]|\(.*?\)|(\d{4})', '', name).strip()
     match = re.search(r'(S\d+E\d+)', name, re.IGNORECASE)
     if match:
         episode_number = match.group(1).upper()
-        # AQUI ESTÁ A CORREÇÃO: Usamos o nome limpo e removemos apenas o SXXEXX
         series_name = clean_name.replace(match.group(0), '').strip()
-        
-        # Correção adicional: para garantir que o nome seja limpo de espaços extras no início ou fim
         series_name = re.sub(r'[,\s]+$', '', series_name)
-        
         return series_name, episode_number
-    
-    # Se não encontrar o padrão SXXEXX, retorna o nome limpo e None para o episódio
     return clean_name, None
 
 # --- Lógica Principal ---
 
 def main():
-    """
-    Função principal que orquestra a leitura, agrupamento, enriquecimento e gravação dos dados.
-    """
     if not os.path.exists(M3U_FILE_PATH):
         print(f"[ERRO] O arquivo de entrada não foi encontrado em: {M3U_FILE_PATH}")
-        print("Por favor, verifique o caminho no topo do script (variável M3U_FILE_PATH).")
         return
 
     print(f"Analisando o arquivo M3U: {M3U_FILE_PATH}")
-    
-    # Substituição da chamada ao m3u_parser
     movies_from_m3u = parse_m3u_manually(M3U_FILE_PATH)
     total_items = len(movies_from_m3u)
     print(f"Encontrados {total_items} itens no arquivo M3U.")
@@ -175,8 +175,11 @@ def main():
         tmdb_info = search_tv_show_on_tmdb(series_name, TMDB_API_TOKEN)
         
         if tmdb_info:
+            if tmdb_info.get("tmdb_id"):
+                certification_info = get_brazil_certification(tmdb_info["tmdb_id"], TMDB_API_TOKEN)
+                tmdb_info["certification"] = certification_info
             series_data['tmdb_info'] = tmdb_info
-            print(f"    Serie Salva na Categoria '{series_data['category']}'.") 
+            print(f"    Série salva na categoria '{series_data['category']}'.") 
             print(f"    [Sucesso] Dados do TMDB encontrados para '{series_name}'.")
         else:
             series_data['tmdb_info'] = {
@@ -184,10 +187,14 @@ def main():
                 "backdrop_path": None,
                 "poster_path": series_data['episodes'][next(iter(series_data['episodes']))].get('m3u_logo'),
                 "overview": "Sinopse não encontrada.",
-                "name": series_name
+                "name": series_name,
+                "certification": {
+                    "ageGroup": "Indisponível",
+                    "descriptors": []
+                }
             }
             print(f"    [Aviso] Nenhum dado encontrado no TMDB para '{series_name}'.")
-        
+
         enriched_series_list.append(series_data)
         
     print(f"\nSalvando a lista completa de séries no arquivo: {OUTPUT_JSON_PATH}")

@@ -2,6 +2,7 @@ import requests
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from m3u_parser import M3uParser
 
 # --- Configurações ---
@@ -12,17 +13,27 @@ TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
 
-# --- Funções ---
+session = requests.Session()
+session.headers.update({
+    "accept": "application/json",
+    "Authorization": f"Bearer {TMDB_API_TOKEN}"
+})
 
-def search_movie_on_tmdb(movie_title, movie_year, api_token):
+# --- Pré-carregar gêneros ---
+def get_genres():
+    url = f"{TMDB_API_BASE_URL}/genre/movie/list"
+    response = session.get(url, params={"language": "pt-BR"}, timeout=10)
+    response.raise_for_status()
+    genres_data = response.json().get("genres", [])
+    return {g["id"]: g["name"] for g in genres_data}
+
+GENRES_MAP = get_genres()
+
+# --- Funções ---
+def search_movie_on_tmdb(movie_title, movie_year):
     if not movie_title:
         return None
 
-    search_url = f"{TMDB_API_BASE_URL}/search/movie"
-    headers = {
-        "accept": "application/json",
-        "Authorization": f"Bearer {api_token}"
-    }
     params = {
         "query": movie_title,
         "include_adult": False,
@@ -33,7 +44,7 @@ def search_movie_on_tmdb(movie_title, movie_year, api_token):
         params['primary_release_year'] = movie_year
 
     try:
-        response = requests.get(search_url, headers=headers, params=params, timeout=10)
+        response = session.get(f"{TMDB_API_BASE_URL}/search/movie", params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -41,12 +52,14 @@ def search_movie_on_tmdb(movie_title, movie_year, api_token):
             first_result = data["results"][0]
             backdrop_path = f"{TMDB_IMAGE_BASE_URL}{first_result.get('backdrop_path')}" if first_result.get('backdrop_path') else None
             poster_path = f"{TMDB_IMAGE_BASE_URL}{first_result.get('poster_path')}" if first_result.get('poster_path') else None
+            genres = [GENRES_MAP.get(gid) for gid in first_result.get("genre_ids", [])]
 
             return {
                 "id": first_result.get("id"),
                 "backdrop_path": backdrop_path,
                 "overview": first_result.get("overview"),
-                "poster_path": poster_path
+                "poster_path": poster_path,
+                "genres": genres
             }
 
     except requests.exceptions.RequestException as e:
@@ -54,15 +67,10 @@ def search_movie_on_tmdb(movie_title, movie_year, api_token):
     
     return None
 
-def get_brazil_certification(movie_id, api_token):
+def get_brazil_certification(movie_id):
     url = f"{TMDB_API_BASE_URL}/movie/{movie_id}/release_dates"
-    headers = {
-        "accept": "application/json",
-        "Authorization": f"Bearer {api_token}"
-    }
-
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = session.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -76,20 +84,47 @@ def get_brazil_certification(movie_id, api_token):
                         "ageGroup": certification,
                         "descriptors": descriptors
                     }
-        return {
-            "ageGroup": "Indisponível",
-            "descriptors": []
-        }
+        return {"ageGroup": "Indisponível", "descriptors": []}
 
     except requests.exceptions.RequestException as e:
         print(f"[Erro] Falha ao buscar classificação indicativa para ID {movie_id}: {e}")
-        return {
-            "ageGroup": "Indisponível",
-            "descriptors": []
-        }
+        return {"ageGroup": "Indisponível", "descriptors": []}
 
 # --- Lógica Principal ---
+def process_movie(movie_data):
+    movie_name_raw = movie_data.get("name")
+    full_name = movie_name_raw.strip() if movie_name_raw else "Nome não encontrado"
 
+    # Limpeza do título
+    clean_pattern = re.compile(r'\(4K\)|\[4K\]|4K|\(HD\)|\[HD\]|\(Dublado\)|\[Dublado\]|\[HDR\]|\[Hybrid\]|\[Dublagem Nao Oficial\]|\[CAM\]|\[Corte do Diretor\]|\[L\]|\[Libras\]|\[LIBRAS\]\[Cinema\]', re.IGNORECASE)
+    movie_name = clean_pattern.sub('', full_name).strip()
+    movie_year = None
+
+    year_match = re.search(r'\((\d{4})\)', movie_name)
+    if year_match:
+        movie_year = year_match.group(1)
+        movie_name = re.sub(r'\s*\(\d{4}\)', '', movie_name).strip()
+
+    tmdb_info = search_movie_on_tmdb(movie_name, movie_year)
+
+    if tmdb_info:
+        if tmdb_info.get("id"):
+            tmdb_info["certification"] = get_brazil_certification(tmdb_info["id"])
+        movie_data['tmdb_info'] = tmdb_info
+    else:
+        fallback_logo = movie_data.get("attributes", {}).get("tvg-logo")
+        if fallback_logo:
+            movie_data['tmdb_info'] = {
+                "backdrop_path": None,
+                "overview": "Sinopse não encontrada.",
+                "poster_path": fallback_logo,
+                "genres": [],
+                "certification": {"ageGroup": "Indisponível", "descriptors": []}
+            }
+        else:
+            movie_data['tmdb_info'] = None
+
+    return movie_data
 def main():
     if not os.path.exists(M3U_FILE_PATH):
         print(f"[ERRO] O arquivo de entrada não foi encontrado em: {M3U_FILE_PATH}")
@@ -105,48 +140,12 @@ def main():
 
     enriched_movie_list = []
 
-    for index, movie_data in enumerate(movies_from_m3u):
-        movie_name_raw = movie_data.get("name")
-        full_name = movie_name_raw.strip() if movie_name_raw else "Nome não encontrado"
-
-        movie_name = re.sub(r'\(4K\)|\[4K\]|4K|\(HD\)|\[HD\]|\(Dublado\)|\[Dublado\]|\[HDR\]|\[Hybrid\]|\[Dublagem Nao Oficial\]|\[CAM\]|\[Corte do Diretor\]|\[L\]|\[Libras\]|\[LIBRAS\]\[Cinema\]', '', full_name, flags=re.IGNORECASE).strip()
-        movie_year = None
-
-        year_match = re.search(r'\((\d{4})\)', movie_name)
-        if year_match:
-            movie_year = year_match.group(1)
-            movie_name = re.sub(r'\s*\(\d{4}\)', '', movie_name).strip()
-
-        print(f"\n({index + 1}/{total_movies}) Processando: '{full_name}'")
-        print(f"   [Título Limpo] Usando para a busca: '{movie_name}'")
-
-        tmdb_info = search_movie_on_tmdb(movie_name, movie_year, TMDB_API_TOKEN)
-
-        if tmdb_info:
-            if tmdb_info.get("id"):
-                certification_info = get_brazil_certification(tmdb_info["id"], TMDB_API_TOKEN)
-                tmdb_info["certification"] = certification_info
-            movie_data['tmdb_info'] = tmdb_info
-            print(f"   [Sucesso] Dados do TMDB encontrados para '{movie_name}'.")
-        else:
-            print(f"   [Aviso] Nenhum dado encontrado no TMDB para '{movie_name}'.")
-            fallback_logo = movie_data.get("attributes", {}).get("tvg-logo")
-            if fallback_logo:
-                movie_data['tmdb_info'] = {
-                    "backdrop_path": None,
-                    "overview": "Sinopse não encontrada.",
-                    "poster_path": fallback_logo,
-                    "certification": {
-                        "ageGroup": "Indisponível",
-                        "descriptors": []
-                    }
-                }
-                print(f"   [Fallback] Usando 'tvg-logo' do M3U como pôster.")
-            else:
-                movie_data['tmdb_info'] = None
-                print(f"   [Falha] Nenhuma informação de imagem encontrada (TMDB ou tvg-logo).")
-
-        enriched_movie_list.append(movie_data)
+    # Processamento paralelo
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(process_movie, movie) for movie in movies_from_m3u]
+        for i, future in enumerate(as_completed(futures), 1):
+            enriched_movie_list.append(future.result())
+            print(f"({i}/{total_movies}) Filme processado.")
 
     print(f"\nSalvando a lista completa no arquivo: {OUTPUT_JSON_PATH}")
     try:
